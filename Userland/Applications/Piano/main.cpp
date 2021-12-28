@@ -58,10 +58,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         save_path = GUI::FilePicker::get_save_filepath(window, "Untitled", "wav");
         if (!save_path.has_value())
             return;
-        wav_writer.set_file(save_path.value());
-        if (wav_writer.has_error()) {
-            GUI::MessageBox::show(window, String::formatted("Failed to export WAV file: {}", wav_writer.error_string()), "Error", GUI::MessageBox::Type::Error);
-            wav_writer.clear_error();
+
+        auto result = wav_writer.set_file(save_path.value());
+        if (result.is_error()) {
+            GUI::MessageBox::show(window, String::formatted("Failed to export WAV file: {}", result.error().string_literal()), "Error", GUI::MessageBox::Type::Error);
             return;
         }
         need_to_write_wav = true;
