@@ -32,30 +32,26 @@ WavWriter::~WavWriter()
 
 ErrorOr<void> WavWriter::set_file(StringView path)
 {
-    m_file = TRY(Core::File::open(path, Core::OpenMode::ReadWrite));
-    m_file->seek(44);
+    m_file = TRY(Core::Stream::File::open(path, Core::Stream::OpenMode::ReadWrite));
+    TRY(m_file->seek(44, Core::Stream::SeekMode::SetPosition));
     m_finalized = false;
     return {};
 }
 
-ErrorOr<void> WavWriter::write_samples(const u8* samples, size_t size)
+ErrorOr<void> WavWriter::write_samples(ReadonlyBytes samples)
 {
-    m_data_sz += size;
-    if (m_file->write(samples, size))
-        return {};
-    return Error::from_errno(m_file->error());
+    m_data_sz += TRY(m_file->write(samples));
+    return {};
 }
 
 ErrorOr<void> WavWriter::finalize()
 {
     VERIFY(!m_finalized);
     m_finalized = true;
-    if (m_file) {
-        if (!m_file->seek(0))
-            return Error::from_errno(m_file->error());
+    if (m_file.has_value()) {
+        TRY(m_file->seek(0, Core::Stream::SeekMode::SetPosition));
         TRY(write_header());
-        if (!m_file->close())
-            return Error::from_errno(m_file->error());
+        m_file->close();
     }
     m_data_sz = 0;
     return {};
@@ -63,61 +59,49 @@ ErrorOr<void> WavWriter::finalize()
 
 ErrorOr<void> WavWriter::write_header()
 {
+    auto bytes = ByteBuffer::create_uninitialized(44);
+    if (!bytes.has_value())
+        return Error::from_string_literal("Could not allocate buffer for header");
+    bytes = bytes.release_value();
+
     // "RIFF"
-    static u32 riff = 0x46464952;
-    if (!m_file->write(reinterpret_cast<u8*>(&riff), sizeof(riff)))
-        return Error::from_errno(m_file->error());
+    TRY(bytes->try_append(("RIFF"sv).bytes()));
 
     // Size of data + (size of header - previous field - this field)
-    u32 sz = m_data_sz + (44 - 4 - 4);
-    if (m_file->write(reinterpret_cast<u8*>(&sz), sizeof(sz)))
-        return Error::from_errno(m_file->error());
+    u32 const size = m_data_sz + (44 - 4 - 4);
+    TRY(bytes->try_append(&size, sizeof(size)));
 
     // "WAVE"
-    static u32 wave = 0x45564157;
-    if (m_file->write(reinterpret_cast<u8*>(&wave), sizeof(wave)))
-        return Error::from_errno(m_file->error());
-
     // "fmt "
-    static u32 fmt_id = 0x20746D66;
-    if (m_file->write(reinterpret_cast<u8*>(&fmt_id), sizeof(fmt_id)))
-        return Error::from_errno(m_file->error());
+    TRY(bytes->try_append(("WAVEfmt "sv).bytes()));
 
     // Size of the next 6 fields
-    static u32 fmt_size = 16;
-    if (m_file->write(reinterpret_cast<u8*>(&fmt_size), sizeof(fmt_size)))
-        return Error::from_errno(m_file->error());
+    static u32 const fmt_size = 16;
+    TRY(bytes->try_append(&fmt_size, sizeof(fmt_size)));
 
     // 1 for PCM
-    static u16 audio_format = 1;
-    if (m_file->write(reinterpret_cast<u8*>(&audio_format), sizeof(audio_format)))
-        return Error::from_errno(m_file->error());
+    static u16 const audio_format = 1;
+    TRY(bytes->try_append(&audio_format, sizeof(audio_format)));
 
-    if (m_file->write(reinterpret_cast<u8*>(&m_num_channels), sizeof(m_num_channels)))
-        return Error::from_errno(m_file->error());
+    TRY(bytes->try_append(&m_num_channels, sizeof(m_num_channels)));
 
-    if (m_file->write(reinterpret_cast<u8*>(&m_sample_rate), sizeof(m_sample_rate)))
-        return Error::from_errno(m_file->error());
+    TRY(bytes->try_append(&m_sample_rate, sizeof(m_sample_rate)));
 
-    u32 byte_rate = m_sample_rate * m_num_channels * (m_bits_per_sample / 8);
-    if (m_file->write(reinterpret_cast<u8*>(&byte_rate), sizeof(byte_rate)))
-        return Error::from_errno(m_file->error());
+    u32 const byte_rate = m_sample_rate * m_num_channels * (m_bits_per_sample / 8);
+    TRY(bytes->try_append(&byte_rate, sizeof(byte_rate)));
 
-    u16 block_align = m_num_channels * (m_bits_per_sample / 8);
-    if (m_file->write(reinterpret_cast<u8*>(&block_align), sizeof(block_align)))
-        return Error::from_errno(m_file->error());
+    u16 const block_align = m_num_channels * (m_bits_per_sample / 8);
+    TRY(bytes->try_append(&block_align, sizeof(block_align)));
 
-    if (m_file->write(reinterpret_cast<u8*>(&m_bits_per_sample), sizeof(m_bits_per_sample)))
-        return Error::from_errno(m_file->error());
+    TRY(bytes->try_append(&m_bits_per_sample, sizeof(m_bits_per_sample)));
 
     // "data"
-    static u32 chunk_id = 0x61746164;
-    if (m_file->write(reinterpret_cast<u8*>(&chunk_id), sizeof(chunk_id)))
-        return Error::from_errno(m_file->error());
+    static u32 const chunk_id = 0x61746164;
+    TRY(bytes->try_append(&chunk_id, sizeof(chunk_id)));
 
-    if (m_file->write(reinterpret_cast<u8*>(&m_data_sz), sizeof(m_data_sz)))
-        return Error::from_errno(m_file->error());
+    TRY(bytes->try_append(&m_data_sz, sizeof(m_data_sz)));
 
+    TRY(m_file->write(bytes->span()));
     return {};
 }
 
