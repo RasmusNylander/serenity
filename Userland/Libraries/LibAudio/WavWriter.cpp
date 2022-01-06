@@ -38,10 +38,11 @@ ErrorOr<void> WavWriter::set_file(StringView path)
     return {};
 }
 
-ErrorOr<void> WavWriter::write_samples(ReadonlyBytes samples)
+ErrorOr<size_t> WavWriter::write_samples(ReadonlyBytes samples)
 {
-    m_data_sz += TRY(m_file->write(samples));
-    return {};
+    size_t bytes_written = TRY(m_file->write(samples));
+    m_data_sz += bytes_written;
+    return bytes_written;
 }
 
 ErrorOr<void> WavWriter::finalize()
@@ -49,7 +50,6 @@ ErrorOr<void> WavWriter::finalize()
     VERIFY(!m_finalized);
     m_finalized = true;
     if (m_file.has_value()) {
-        TRY(m_file->seek(0, Core::Stream::SeekMode::SetPosition));
         TRY(write_header());
         m_file->close();
     }
@@ -57,7 +57,14 @@ ErrorOr<void> WavWriter::finalize()
     return {};
 }
 
-ErrorOr<void> WavWriter::write_header()
+ErrorOr<size_t> WavWriter::write_header()
+{
+    ReadonlyBytes header = TRY(create_header());
+    TRY(m_file->seek(0, Core::Stream::SeekMode::SetPosition));
+    return TRY(m_file->write(header));
+}
+
+ErrorOr<ReadonlyBytes> WavWriter::create_header()
 {
     auto bytes = ByteBuffer::create_uninitialized(44);
     if (!bytes.has_value())
@@ -100,9 +107,7 @@ ErrorOr<void> WavWriter::write_header()
     TRY(bytes->try_append(&chunk_id, sizeof(chunk_id)));
 
     TRY(bytes->try_append(&m_data_sz, sizeof(m_data_sz)));
-
-    TRY(m_file->write(bytes->span()));
-    return {};
+    return bytes;
 }
 
 }

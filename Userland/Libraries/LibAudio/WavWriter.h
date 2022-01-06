@@ -22,7 +22,7 @@ public:
     WavWriter(int sample_rate = 44100, u16 num_channels = 2, u16 bits_per_sample = 16);
     ~WavWriter();
 
-    ErrorOr<void> write_samples(ReadonlyBytes samples);
+    ErrorOr<size_t> write_samples(ReadonlyBytes samples);
     ErrorOr<void> finalize(); // You can finalize manually or let the destructor do it.
 
     u32 sample_rate() const { return m_sample_rate; }
@@ -35,7 +35,8 @@ public:
     void set_bits_per_sample(int bits_per_sample) { m_bits_per_sample = bits_per_sample; }
 
 private:
-    ErrorOr<void> write_header();
+    ErrorOr<ReadonlyBytes> create_header();
+    ErrorOr<size_t> write_header();
     Optional<Core::Stream::File> m_file;
     bool m_finalized { false };
 
